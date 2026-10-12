@@ -49,6 +49,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int is_thread;               // 1 if this process is a thread created by clone()
+  int priority;                // CPU scheduling priority: 1 (highest) to 20 (lowest)
+  int wait_ticks;              // Ticks spent in RUNNABLE state (used for aging)
 };
 
 // Process memory is laid out contiguously, low addresses first:

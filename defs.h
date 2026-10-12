@@ -120,6 +120,14 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int             clone(void(*)(void*), void*, void*);
+int             join(void);
+int             sem_init(int, int);
+int             sem_wait(int);
+int             sem_signal(int);
+int             set_priority(int, int);
+int             get_priority(int);
+void            aging_tick(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

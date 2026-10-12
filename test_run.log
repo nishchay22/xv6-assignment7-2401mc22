@@ -1,0 +1,174 @@
+threadtest
+========================================
+Question 1: Kernel Threads (clone/join)
+Author: Nishchay (Roll No: 2401mc22)
+========================================
+Creating 3 threads, each incrementing counter 100000 times...
+Expected total increments: 300000
+Spawned thread 1 with PID 4
+Spawned thread 2 with PID 5
+Spawned thread 3 with PID 6
+[Thread 1[Thread 2] Started, ini[Thread 3] Started, initial counter = 0
+] Started, initial ctial counter = 0
+ounter = 0
+[Thread 2] Finished work
+[ThJoined thread with PID read 3] Finished work
+5
+Joined thread with PID 6
+[Thread 1] Finished work
+Joined thread with PID 4
+
+Final Counter Value: 230819 (Expected without race: 300000)
+SUCCESS: Race condition verified! Shared counter (230819) < 300000
+$ synctest
+========================================================
+Question 2: Process/Thread Synchronization (Semaphores)
+Author: Nishchay (Roll No: 2401mc22)
+========================================================
+
+--- Part 1: Synchronized Counter Increment Test ---
+[Thread [Thread 2] Started sy[Thread 3] Starte1] Started synchroninchronized word synchronized wozed worker
+ker
+rker
+[Thread 1] Finished synchronized worker
+Joined thread with PID 8
+[Thread 2] Finished synchronized worker
+Joined thread with PID 9
+[Thread 3] Finished synchronized worker
+Joined thread with PID 10
+Final Counter Value: 300000 (Expected: 300000)
+SUCCESS: Race condition resolved via semaphores! Final counter = 300000
+
+--- Part 2: Classic Producer-Consumer Problem ---
+Buffer Size: 5, Total Items: 15
+Started Producer t[Producer] Produced hread (PID 11)
+item 10 | Buffer count =Started Consumer thread (PID 12)
+ 1/5
+[Producer] Produced item 20 | Buffer count = 2/5
+   [Consumer] Consumed item 10 | Buffer count = 1/5
+[Producer] Produced item 30 | Buffer count = 2/5
+   [Consumer] Consumed item 20 | Buffer count = 1/5
+[Producer] Produced item 40 | Buffer count = 2/5
+   [Consumer] Consumed item 30 | Buffer count = 1/5
+[Producer] Produced item 50 | Buffer count = 2/5
+   [Consumer] Consumed item 40 | Buffer count = 1/5
+[Producer] Produced item 60 | Buffer count = 2/5
+   [Consumer] Consumed item 50 | Buffer count = 1/5
+[Producer] Produced item 70 | Buffer count = 2/5
+   [Consumer] Consumed item 60 | Buffer count = 1/5
+[Producer] Produced item 80 | Buffer count = 2/5
+   [Consumer] Consumed item 70 | Buffer count = 1/5
+[Producer] Produced item 90 | Buffer count = 2/5
+   [Consumer] Consumed item 80 | Buffer count = 1/5
+[Producer] Produced item 100 | Buffer count = 2/5
+   [Consumer] Consumed item 90 | Buffer count = 1/5
+[Producer] Produced item 110 | Buffer count = 2/5
+   [Consumer] Consumed item 100 | Buffer count = 1/5
+[Producer] Produced item 120 | Buffer count = 2/5
+   [Consumer] Consumed item 110 | Buffer count = 1/5
+[Producer] Produced item 130 | Buffer count = 2/5
+   [Consumer] Consumed item 120 | Buffer count = 1/5
+[Producer] Produced item 140 | Buffer count = 2/5
+   [Consumer] Consumed item 130 | Buffer count = 1/5
+[Producer] Produced item 150 | Buffer count = 2/5
+   [Consumer] Consumed item 140 | Buffer count = 1/5
+   [Consumer] Consumed item 150 | Buffer count = 0/5
+SUCCESS: Producer-Consumer completed without overflow/underflow!
+========================================================
+$ deadlock
+========================================================
+Question 3: Deadlock Detection & Banker's Avoidance
+Author: Nishchay (Roll No: 2401mc22)
+========================================================
+
+--------------------------------------------------
+Test 1: Deadlocked Resource Allocation State
+--------------------------------------------------
+Available: [ 0 0 0 ]
+Proc  | Allocation  | Request
+ P0   | 0 1 0     | 0 0 1
+ P1   | 2 0 0     | 0 1 0
+ P2   | 0 0 3     | 1 0 0
+-> RESULT: DEADLOCK DETECTED! Deadlocked processes: P0 P1 P2 
+
+--------------------------------------------------
+Test 2: Safe State (Banker's Algorithm)
+--------------------------------------------------
+Available: [ 3 3 2 ]
+Proc  | Allocation  | Need
+ P0   | 0 1 0     | 7 4 3
+ P1   | 2 0 0     | 1 2 2
+ P2   | 3 0 2     | 6 0 0
+ P3   | 2 1 1     | 0 1 1
+ P4   | 0 0 2     | 4 3 1
+-> RESULT: System is in a SAFE state.
+Safe Sequence: P1 -> P3 -> P4 -> P0 -> P2
+
+--------------------------------------------------
+Test 3: Banker's Avoidance - Request Leads to Unsafe State
+--------------------------------------------------
+Initial State:
+Available: [ 3 3 2 ]
+Proc  | Allocation  | Need
+ P0   | 0 1 0     | 7 4 3
+ P1   | 2 0 0     | 1 2 2
+ P2   | 3 0 2     | 6 0 0
+ P3   | 2 1 1     | 0 1 1
+ P4   | 0 0 2     | 4 3 1
+
+Process P0 requests resources: [ 0 2 0 ]
+Evaluating tentative state:
+Available: [ 3 1 2 ]
+Proc  | Allocation  | Need
+ P0   | 0 3 0     | 7 2 3
+ P1   | 2 0 0     | 1 2 2
+ P2   | 3 0 2     | 6 0 0
+ P3   | 2 1 1     | 0 1 1
+ P4   | 0 0 2     | 4 3 1
+-> RESULT: Request can be safely granted.
+
+--------------------------------------------------
+Task 3c: Real xv6 Process & Pipe Deadlock Simulation
+--------------------------------------------------
+Creating Process A and Process B with circular pipe wait...
+Resource 0: Pipe 1 | Resource 1: Pipe 2
+Process A holds Pipe 1 (write) and waits for Pipe 2 (read)
+Process B holds Pipe 2 (write) and waits for Pipe 1 (read)
+Available: [ 0 0 ]
+Proc  | Allocation  | Request
+ P0   | 1 0     | 0 1
+ P1   | 0 1     | 1 0
+-> RESULT: Circular Wait Deadlock correctly identified between Process A and B!
+Cleaned up pipe simulation processes.
+
+========================================================
+Question 3 Demonstration Completed Successfully!
+========================================================
+$ priotest
+=================================================================
+Question 4: Priority Preemptive CPU Scheduler with Aging
+Author: Nishchay (Roll No: 2401mc22)
+=================================================================
+Forking 4 CPU-bound processes with distinct priorities (1=highest, 20=lowest):
+  Process 0 -> Assigned Priority 5
+  Process 1 -> Assigned Priority 10
+  Process 2 -> Assigned Priority 15
+  Process 3 -> Assigned Priority 20
+-----------------------------------------------------------------
+[Process 0 | PID 17] Started with Priority 5 at Tick 6738
+[Proces[Process 2 | PID 1[Process 3 | Ps 1 | PID 18] Started with Priority 10 at Tick 6887
+9] Started with Priority 15 at Tick 6888
+--> [Process 0 | PID 17] FINISHED at Tick 7277 (Duration: 539 ticks) | Initial Pri: 5, Final Pri: 5
+Parent reaped process with PID 17
+ID 20] Started with Priority 20 at Tick 6892
+--> [Process 1 | PID 18] FINISHED at Tick 8070 (Duration: 1183 ticks) | Initial Pri: 10, Final Pri: 5
+Parent reaped process with PID 18
+--> [Process 3 | PID 20] --> [ProFINISHED at Tick cess 2 | PID 19] 8336 (DuratioFINISHED at Ticn: 1444 ticks) k 8341 (Duration:| Initial Pri: 20 1453 ticks) | Initial Pri: 15,, Final Pri: 5
+ Final Pri: 5
+Parent reaped process with PID 20
+Parent reaped process with PID 19
+-----------------------------------------------------------------
+SUCCESS: All processes completed! Higher priorities finished earlier,
+and lowest priority (20) completed without starvation due to aging!
+=================================================================
+$ 

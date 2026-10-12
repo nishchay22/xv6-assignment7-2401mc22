@@ -112,6 +112,10 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  p->is_thread = 0;
+  p->priority = 10;
+  p->wait_ticks = 0;
+
   return p;
 }
 
@@ -199,6 +203,9 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->is_thread = 0;
+  np->priority = curproc->priority;
+  np->wait_ticks = 0;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -283,17 +290,21 @@ wait(void)
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->parent != curproc)
         continue;
+      if(p->is_thread && curproc != initproc)
+        continue;
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
-        freevm(p->pgdir);
+        if(!p->is_thread)
+          freevm(p->pgdir);
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->is_thread = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
@@ -325,6 +336,7 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
+  static struct proc *last_proc = &ptable.proc[0];
   
   for(;;){
     // Enable interrupts on this processor.
@@ -332,23 +344,47 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+    // Find the lowest priority number (highest priority) among RUNNABLE processes
+    int min_priority = 1000;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+      if(p->state == RUNNABLE && p->priority < min_priority){
+        min_priority = p->priority;
+      }
+    }
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+    if(min_priority < 1000){
+      // Round-robin selection among processes with min_priority
+      struct proc *chosen = 0;
+      struct proc *iter = last_proc;
+      int i;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+      for(i = 0; i < NPROC; i++){
+        iter++;
+        if(iter >= &ptable.proc[NPROC])
+          iter = &ptable.proc[0];
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+        if(iter->state == RUNNABLE && iter->priority == min_priority){
+          chosen = iter;
+          last_proc = iter;
+          break;
+        }
+      }
+
+      if(chosen){
+        p = chosen;
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+        p->wait_ticks = 0;
+
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
     }
     release(&ptable.lock);
 
@@ -532,3 +568,271 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+// =========================================================================
+// Question 1: Kernel-supported threads (clone and join)
+// =========================================================================
+
+int
+clone(void(*fcn)(void*), void *arg, void *stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *curproc = myproc();
+  uint ustack;
+
+  // Allocate process.
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  // Share address space (pgdir) with calling process
+  np->pgdir = curproc->pgdir;
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  np->is_thread = 1;
+  np->priority = curproc->priority;
+  np->wait_ticks = 0;
+  *np->tf = *curproc->tf;
+
+  // Setup user stack:
+  // If stack passed is page-aligned base, stack top is stack + PGSIZE;
+  // otherwise, stack is already pointing to top of stack.
+  if(((uint)stack % PGSIZE) == 0)
+    ustack = (uint)stack + PGSIZE;
+  else
+    ustack = (uint)stack;
+
+  // Set up stack according to x86 cdecl calling convention:
+  // esp + 4: arg
+  // esp: fake return address (0xffffffff)
+  ustack -= 4;
+  *(uint*)ustack = (uint)arg;
+  ustack -= 4;
+  *(uint*)ustack = 0xffffffff;
+
+  np->tf->esp = ustack;
+  np->tf->eip = (uint)fcn;
+  np->tf->eax = 0;
+
+  // Duplicate open file descriptors
+  for(i = 0; i < NOFILE; i++)
+    if(curproc->ofile[i])
+      np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
+
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+  pid = np->pid;
+
+  acquire(&ptable.lock);
+  np->state = RUNNABLE;
+  release(&ptable.lock);
+
+  return pid;
+}
+
+int
+join(void)
+{
+  struct proc *p;
+  int havethreads, pid;
+  struct proc *curproc = myproc();
+
+  acquire(&ptable.lock);
+  for(;;){
+    havethreads = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != curproc || !p->is_thread)
+        continue;
+      havethreads = 1;
+      if(p->state == ZOMBIE){
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        // Do NOT call freevm(p->pgdir) because address space is shared!
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        p->is_thread = 0;
+        p->state = UNUSED;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    // No point waiting if no threads or process was killed
+    if(!havethreads || curproc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for thread to exit
+    sleep(curproc, &ptable.lock);
+  }
+}
+
+// =========================================================================
+// Question 2: Process/Thread Synchronization using Semaphores
+// =========================================================================
+
+#define MAX_SEM 10
+
+struct semaphore {
+  int value;
+  int active;
+  struct spinlock lk;
+};
+
+static struct semaphore semtable[MAX_SEM];
+static int sem_inited = 0;
+
+static void
+wakeup_one1(void *chan)
+{
+  struct proc *p;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == SLEEPING && p->chan == chan){
+      p->state = RUNNABLE;
+      break;
+    }
+  }
+}
+
+static void
+wakeup_one(void *chan)
+{
+  acquire(&ptable.lock);
+  wakeup_one1(chan);
+  release(&ptable.lock);
+}
+
+int
+sem_init(int sem_id, int value)
+{
+  if(sem_id < 0 || sem_id >= MAX_SEM || value < 0)
+    return -1;
+
+  if(!sem_inited){
+    int i;
+    for(i = 0; i < MAX_SEM; i++){
+      initlock(&semtable[i].lk, "semaphore");
+      semtable[i].active = 0;
+    }
+    sem_inited = 1;
+  }
+
+  acquire(&semtable[sem_id].lk);
+  semtable[sem_id].value = value;
+  semtable[sem_id].active = 1;
+  release(&semtable[sem_id].lk);
+
+  return 0;
+}
+
+int
+sem_wait(int sem_id)
+{
+  if(sem_id < 0 || sem_id >= MAX_SEM)
+    return -1;
+
+  acquire(&semtable[sem_id].lk);
+  if(!semtable[sem_id].active){
+    release(&semtable[sem_id].lk);
+    return -1;
+  }
+
+  semtable[sem_id].value--;
+  if(semtable[sem_id].value < 0){
+    sleep(&semtable[sem_id], &semtable[sem_id].lk);
+  }
+  release(&semtable[sem_id].lk);
+  return 0;
+}
+
+int
+sem_signal(int sem_id)
+{
+  if(sem_id < 0 || sem_id >= MAX_SEM)
+    return -1;
+
+  acquire(&semtable[sem_id].lk);
+  if(!semtable[sem_id].active){
+    release(&semtable[sem_id].lk);
+    return -1;
+  }
+
+  semtable[sem_id].value++;
+  if(semtable[sem_id].value <= 0){
+    wakeup_one(&semtable[sem_id]);
+  }
+  release(&semtable[sem_id].lk);
+  return 0;
+}
+
+// =========================================================================
+// Question 4: Priority Scheduling and Aging
+// =========================================================================
+
+int
+set_priority(int pid, int priority)
+{
+  struct proc *p;
+  int old_pri = -1;
+
+  if(priority < 1 || priority > 20)
+    return -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid && p->state != UNUSED){
+      old_pri = p->priority;
+      p->priority = priority;
+      p->wait_ticks = 0;
+      break;
+    }
+  }
+  release(&ptable.lock);
+
+  return old_pri;
+}
+
+int
+get_priority(int pid)
+{
+  struct proc *p;
+  int pri = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid && p->state != UNUSED){
+      pri = p->priority;
+      break;
+    }
+  }
+  release(&ptable.lock);
+
+  return pri;
+}
+
+void
+aging_tick(void)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == RUNNABLE){
+      p->wait_ticks++;
+      if(p->wait_ticks >= 30){
+        if(p->priority > 1){
+          p->priority--; // Decrement number = higher priority
+        }
+        p->wait_ticks = 0;
+      }
+    }
+  }
+  release(&ptable.lock);
+}
+
